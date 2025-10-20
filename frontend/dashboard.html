@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐺 La Huerta del Husky - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #2d3748;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #4c51bf;
+            margin: 0.5rem 0;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .status-online {
+            color: #48bb78;
+            font-weight: bold;
+        }
+
+        .status-offline {
+            color: #f56565;
+            font-weight: bold;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .api-endpoints {
+            background: #f7fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .endpoint {
+            font-family: 'Courier New', monospace;
+            background: #2d3748;
+            color: #68d391;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin: 5px 0;
+            display: block;
+            font-size: 0.9rem;
+        }
+
+        .welcome {
+            text-align: center;
+            color: white;
+            margin-bottom: 2rem;
+        }
+
+        .welcome h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .welcome p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            🐺 La Huerta del Husky
+        </div>
+        <div>
+            <span id="server-status" class="status-offline">🔴 Conectando...</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="welcome">
+            <h1>🌱 Dashboard</h1>
+            <p>Sistema de gestión completo para tu vivero</p>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Inventario -->
+            <div class="card">
+                <div class="card-title">
+                    📦 Inventario
+                </div>
+                <div class="stat-number" id="total-plants">...</div>
+                <p>Plantas en stock</p>
+                <button class="btn" onclick="loadInventory()">Ver Inventario</button>
+                <button class="btn" onclick="checkLowStock()">Stock Bajo</button>
+            </div>
+
+            <!-- Imágenes -->
+            <div class="card">
+                <div class="card-title">
+                    📸 Imágenes
+                </div>
+                <div class="stat-number" id="total-images">...</div>
+                <p>Fotos recibidas</p>
+                <button class="btn" onclick="loadImages()">Ver Galería</button>
+                <button class="btn" onclick="analyzeImages()">Analizar</button>
+            </div>
+
+            <!-- Conversaciones -->
+            <div class="card">
+                <div class="card-title">
+                    💬 Conversaciones
+                </div>
+                <div class="stat-number" id="total-conversations">...</div>
+                <p>Chats activos</p>
+                <button class="btn" onclick="loadConversations()">Ver Chats</button>
+                <button class="btn" onclick="getStats()">Estadísticas</button>
+            </div>
+
+            <!-- Bot Status -->
+            <div class="card">
+                <div class="card-title">
+                    🤖 Bot WhatsApp
+                </div>
+                <div id="bot-status" class="status-offline">Desconectado</div>
+                <p>Estado del bot</p>
+                <button class="btn" onclick="startBot()">Iniciar Bot</button>
+                <button class="btn" onclick="checkBotStatus()">Verificar</button>
+            </div>
+
+            <!-- API Endpoints -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <div class="card-title">
+                    📡 API Endpoints Disponibles
+                </div>
+                <div class="api-endpoints">
+                    <span class="endpoint">GET /api/inventory - Todo el inventario</span>
+                    <span class="endpoint">GET /api/inventory/stats - Estadísticas</span>
+                    <span class="endpoint">GET /api/images - Todas las imágenes</span>
+                    <span class="endpoint">POST /api/images/upload - Subir imagen</span>
+                    <span class="endpoint">GET /api/conversations - Conversaciones</span>
+                    <span class="endpoint">GET /api/conversations/stats - Stats de chats</span>
+                </div>
+                <button class="btn" onclick="testAPI()">Probar API</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Verificar estado del servidor
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/api/inventory');
+                if (response.ok) {
+                    document.getElementById('server-status').textContent = '🟢 Servidor Online';
+                    document.getElementById('server-status').className = 'status-online';
+                    loadDashboardData();
+                }
+            } catch (error) {
+                document.getElementById('server-status').textContent = '🔴 Servidor Offline';
+                document.getElementById('server-status').className = 'status-offline';
+            }
+        }
+
+        // Cargar datos del dashboard
+        async function loadDashboardData() {
+            try {
+                // Inventario
+                const inventoryResponse = await fetch('/api/inventory/stats');
+                if (inventoryResponse.ok) {
+                    const inventoryData = await inventoryResponse.json();
+                    document.getElementById('total-plants').textContent = inventoryData.data.summary.totalPlants || '0';
+                }
+
+                // Imágenes
+                const imagesResponse = await fetch('/api/images');
+                if (imagesResponse.ok) {
+                    const imagesData = await imagesResponse.json();
+                    document.getElementById('total-images').textContent = imagesData.count || '0';
+                }
+
+                // Conversaciones
+                const conversationsResponse = await fetch('/api/conversations');
+                if (conversationsResponse.ok) {
+                    const conversationsData = await conversationsResponse.json();
+                    document.getElementById('total-conversations').textContent = conversationsData.count || '0';
+                }
+            } catch (error) {
+                console.error('Error cargando datos:', error);
+            }
+        }
+
+        // Funciones de botones
+        async function loadInventory() {
+            try {
+                const response = await fetch('/api/inventory');
+                const data = await response.json();
+                alert(`📦 Inventario:\n\nPlantas: ${data.data.plants.length}\nMacetas: ${data.data.pots.length}`);
+            } catch (error) {
+                alert('❌ Error cargando inventario');
+            }
+        }
+
+        async function checkLowStock() {
+            try {
+                const response = await fetch('/api/inventory/low-stock');
+                const data = await response.json();
+                if (data.data.length === 0) {
+                    alert('✅ No hay productos con stock bajo');
+                } else {
+                    const items = data.data.map(item => `⚠️ ${item.displayName}: ${item.stock} unidades`).join('\n');
+                    alert(`🚨 STOCK BAJO:\n\n${items}`);
+                }
+            } catch (error) {
+                alert('❌ Error verificando stock');
+            }
+        }
+
+        async function loadImages() {
+            try {
+                const response = await fetch('/api/images');
+                const data = await response.json();
+                alert(`📸 Imágenes: ${data.count} archivos encontrados`);
+            } catch (error) {
+                alert('❌ Error cargando imágenes');
+            }
+        }
+
+        function analyzeImages() {
+            alert('🔍 Función de análisis en desarrollo');
+        }
+
+        async function loadConversations() {
+            try {
+                const response = await fetch('/api/conversations/stats');
+                const data = await response.json();
+                const stats = data.data;
+                alert(`💬 Estadísticas:\n\nTotal conversaciones: ${stats.totalConversations}\nMensajes totales: ${stats.totalMessages}\nActivas hoy: ${stats.activeToday}`);
+            } catch (error) {
+                alert('❌ Error cargando conversaciones');
+            }
+        }
+
+        function getStats() {
+            loadConversations();
+        }
+
+        function startBot() {
+            alert('🤖 Para iniciar el bot, ejecuta en terminal:\nnpm run bot');
+        }
+
+        function checkBotStatus() {
+            alert('🔄 Verificando estado del bot...\n\nPara verificar, revisa la terminal donde ejecutaste el bot.');
+        }
+
+        async function testAPI() {
+            try {
+                const response = await fetch('/api/inventory');
+                if (response.ok) {
+                    alert('✅ API funcionando correctamente');
+                } else {
+                    alert('❌ API no responde');
+                }
+            } catch (error) {
+                alert('❌ Error conectando con API');
+            }
+        }
+
+        // Inicializar al cargar la página
+        document.addEventListener('DOMContentLoaded', function() {
+            checkServerStatus();
+            setInterval(checkServerStatus, 30000); // Verificar cada 30 segundos
+        });
+    </script>
+</body>
+</html>

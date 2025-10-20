@@ -1,16 +1,49 @@
 {
-  "name": "botwsp",
-  "version": "1.0.0",
-  "main": "whatsapp-bot.js",
+  "name": "huerta-husky-system",
+  "version": "2.0.0",
+  "description": "Sistema completo WhatsApp Bot + API para La Huerta del Husky",
+  "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "bot": "node bot/whatsapp-bot.js",
+    "full": "node scripts/start-all.js",
+    "setup": "npm install && node setup.js",
+    "clean": "node scripts/clean.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "plants",
+    "inventory",
+    "business",
+    "api",
+    "express"
+  ],
+  "author": "La Huerta del Husky",
+  "license": "MIT",
   "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "axios": "^1.12.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.2",
+    "form-data": "^4.0.4",
+    "groq-sdk": "^0.3.3",
+    "moment": "^2.29.4",
+    "multer": "^1.4.5-lts.1",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.34.1"
+    "sharp": "^0.32.6",
+    "uuid": "^9.0.0",
+    "whatsapp-web.js": "^1.23.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "optionalDependencies": {
+    "@google-cloud/vision": "^5.3.4"
   }
 }
