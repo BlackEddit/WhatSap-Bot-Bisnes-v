@@ -29,14 +29,108 @@ const motivationalCoach = new MotivationalCoach();
 const reminderSystem = new ReminderSystem();
 const imageAnalyzer = new ImageAnalyzer();
 
+// Estado global del cliente
+let isClientReady = false;
+let isInitializing = false;  // Track if client is currently initializing
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY = 10000;
+
 // Crear cliente con autenticación local
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        clientId: 'husky-bot-main',
+        dataPath: './.wwebjs_auth'
+    }),
     puppeteer: {
-        headless: false, // Volver a mostrar navegador para debugging
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+        headless: true,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--single-process'
+        ],
+        timeout: 60000
+    },
+    qrMaxRetries: 5,
+    restartOnAuthFail: true
 });
+
+/**
+ * 🔄 Función para reintentar conexión
+ */
+function attemptReconnect() {
+    // Prevent re-initialization if already initializing
+    if (isInitializing) {
+        console.log('⏳ Ya hay una inicialización en progreso, esperando...');
+        return;
+    }
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('❌ Se alcanzó el máximo de intentos de reconexión.');
+        console.log('💡 Reinicia el bot manualmente con: npm run bot');
+        return;
+    }
+    
+    reconnectAttempts++;
+    isInitializing = true;
+    console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+    
+    setTimeout(() => {
+        client.initialize()
+            .then(() => {
+                isInitializing = false;
+                // La conexión exitosa se maneja en los eventos 'ready' o 'authenticated'
+                console.log('🔄 Inicialización completada, esperando eventos del cliente...');
+            })
+            .catch((error) => {
+                isInitializing = false;
+                console.error('❌ Error en reconexión:', error.message);
+                // Solo reintentar si no hemos alcanzado el máximo
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    attemptReconnect();
+                } else {
+                    console.error('❌ Se agotaron los intentos de reconexión.');
+                    console.log('💡 Reinicia el bot manualmente con: npm run bot');
+                }
+            });
+    }, RECONNECT_DELAY);
+}
+
+/**
+ * 🔒 Verificar si el cliente está listo
+ */
+function isClientConnected() {
+    try {
+        return isClientReady && client && client.info;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * 🔒 Función segura para enviar respuesta
+ */
+async function safeReply(message, response) {
+    if (!isClientConnected()) {
+        console.error('❌ No se puede enviar mensaje: cliente desconectado');
+        return false;
+    }
+    
+    try {
+        await message.reply(response);
+        return true;
+    } catch (error) {
+        console.error('❌ Error enviando respuesta:', error.message);
+        if (error.message.includes('Evaluation failed') || error.message.includes('Protocol error')) {
+            isClientReady = false;
+        }
+        return false;
+    }
+}
 
 // Generar código QR
 client.on('qr', (qr) => {
@@ -47,18 +141,28 @@ client.on('qr', (qr) => {
 // Eventos de debugging
 client.on('authenticated', () => {
     console.log('🔐 Cliente autenticado correctamente');
+    reconnectAttempts = 0;
 });
 
 client.on('auth_failure', (msg) => {
     console.error('❌ Error de autenticación:', msg);
+    isClientReady = false;
+    attemptReconnect();
 });
 
 client.on('disconnected', (reason) => {
     console.log('🔌 Cliente desconectado:', reason);
+    isClientReady = false;
+    if (reason !== 'LOGOUT') {
+        attemptReconnect();
+    }
 });
 
 // Cliente listo
 client.on('ready', async () => {
+    isClientReady = true;
+    reconnectAttempts = 0;
+    
     console.log('✅ Bot conectado exitosamente!');
     console.log('🎯 Bot listo para responder mensajes');
     console.log('📤 Bot puede enviar mensajes proactivos');
@@ -92,16 +196,33 @@ function getRandomDelay() {
     return Math.floor(Math.random() * 3000) + 1000; // Entre 1-4 segundos
 }
 
-// Función para simular escritura
+// Función para simular escritura - con manejo de errores
 async function simulateTyping(message, delay) {
-    const chat = await message.getChat();
-    await chat.sendStateTyping();
-    await new Promise(resolve => setTimeout(resolve, delay));
-    await chat.clearState();
+    if (!isClientConnected()) {
+        console.log('⚠️ Cliente no conectado, saltando simulación de escritura');
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return;
+    }
+    
+    try {
+        const chat = await message.getChat();
+        await chat.sendStateTyping();
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await chat.clearState();
+    } catch (error) {
+        console.log('⚠️ Error simulando escritura (ignorando):', error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
 }
 
 // Manejo de mensajes
 client.on('message', async (message) => {
+    // Verificar que el cliente está conectado
+    if (!isClientConnected()) {
+        console.log('⚠️ Mensaje recibido pero cliente no está listo');
+        return;
+    }
+    
     // FILTRAR mensajes no deseados MEJORADO
     if (message.from === 'status@broadcast') {
         console.log('🚫 Ignorando status broadcast');
@@ -170,9 +291,9 @@ client.on('message', async (message) => {
         
         try {
             const result = await reminderSystem.createReminder(reminderText);
-            await message.reply(result.message);
+            await safeReply(message, result.message);
         } catch (error) {
-            await message.reply(`❌ Error creando recordatorio: ${error.message}`);
+            await safeReply(message, `❌ Error creando recordatorio: ${error.message}`);
         }
         return;
     }
@@ -184,7 +305,7 @@ client.on('message', async (message) => {
         if (media.mimetype.startsWith('image/')) {
             console.log('🖼️ Imagen detectada - Iniciando análisis de planta...');
             await simulateTyping(message, 2000);
-            await message.reply('🔬 Analizando tu planta con múltiples APIs especializadas...\n⏳ Esto puede tomar unos segundos...');
+            await safeReply(message, '🔬 Analizando tu planta con múltiples APIs especializadas...\n⏳ Esto puede tomar unos segundos...');
             
             try {
                 // Convertir media a buffer
@@ -207,14 +328,14 @@ client.on('message', async (message) => {
                         responseMessage += `💬 ¡Pero puedo conseguirla! Pregúntame por disponibilidad.`;
                     }
                     
-                    await message.reply(responseMessage);
+                    await safeReply(message, responseMessage);
                 } else {
-                    await message.reply(analysisResult.message || '❌ No pude identificar esta imagen como una planta. \n\n🌿 Intenta con una foto más clara de la planta o pregúntame directamente qué plantas necesitas.');
+                    await safeReply(message, analysisResult.message || '❌ No pude identificar esta imagen como una planta. \n\n🌿 Intenta con una foto más clara de la planta o pregúntame directamente qué plantas necesitas.');
                 }
                 
             } catch (error) {
                 console.error('❌ Error analizando imagen:', error);
-                await message.reply('❌ Hubo un error analizando tu imagen. \n\n💬 Puedes describirme la planta que buscas y te ayudo a encontrarla.');
+                await safeReply(message, '❌ Hubo un error analizando tu imagen. \n\n💬 Puedes describirme la planta que buscas y te ayudo a encontrarla.');
             }
             return;
         }
@@ -241,9 +362,9 @@ client.on('message', async (message) => {
                 apiStatus += `\n`;
             });
             
-            await message.reply(apiStatus);
+            await safeReply(message, apiStatus);
         } catch (error) {
-            await message.reply('❌ Error obteniendo estado de APIs');
+            await safeReply(message, '❌ Error obteniendo estado de APIs');
         }
         return;
     }
@@ -271,7 +392,7 @@ client.on('message', async (message) => {
         
         setupMessage += `💡 **CON $300 de Google tienes meses de identificaciones perfectas**`;
         
-        await message.reply(setupMessage);
+        await safeReply(message, setupMessage);
         return;
     }
     
@@ -281,7 +402,7 @@ client.on('message', async (message) => {
         await simulateTyping(message, delay);
         
         const recognition = productRecognizer.recognizeProduct(description);
-        await message.reply(recognition.message);
+        await safeReply(message, recognition.message);
         return;
     }
 
@@ -300,12 +421,12 @@ client.on('message', async (message) => {
             
             if (found) {
                 const result = productRecognizer.updatePrice(found[0], parseFloat(newPrice), reason);
-                await message.reply(result.message);
+                await safeReply(message, result.message);
             } else {
-                await message.reply('❌ Producto no encontrado. Usa !productos para ver la lista.');
+                await safeReply(message, '❌ Producto no encontrado. Usa !productos para ver la lista.');
             }
         } else {
-            await message.reply('❌ Uso: !precio [producto] [nuevo_precio] [razón_opcional]');
+            await safeReply(message, '❌ Uso: !precio [producto] [nuevo_precio] [razón_opcional]');
         }
         return;
     }
@@ -313,7 +434,7 @@ client.on('message', async (message) => {
     if (message.body === '!productos') {
         await simulateTyping(message, delay);
         const productsList = productRecognizer.getProductsList();
-        await message.reply(productsList);
+        await safeReply(message, productsList);
         return;
     }
 
@@ -325,9 +446,9 @@ client.on('message', async (message) => {
             
             await simulateTyping(message, delay);
             const results = productRecognizer.searchByPrice(minPrice, maxPrice);
-            await message.reply(results);
+            await safeReply(message, results);
         } else {
-            await message.reply('❌ Uso: !buscar_precio [precio_min] [precio_max]');
+            await safeReply(message, '❌ Uso: !buscar_precio [precio_min] [precio_max]');
         }
         return;
     }
@@ -340,16 +461,16 @@ client.on('message', async (message) => {
             const description = desc.join(' ');
             
             await simulateTyping(message, delay);
-            await message.reply('🎨 Generando producto con imagen de IA...');
+            await safeReply(message, '🎨 Generando producto con imagen de IA...');
             
             const result = await inventory.addProduct(name, category, price, stock, description);
-            await message.reply(result.message);
+            await safeReply(message, result.message);
             
             if (result.success) {
-                await message.reply(inventory.formatProductForWhatsApp(result.product));
+                await safeReply(message, inventory.formatProductForWhatsApp(result.product));
             }
         } else {
-            await message.reply('❌ Uso: !agregar [nombre] [categoría] [precio] [stock] [descripción]');
+            await safeReply(message, '❌ Uso: !agregar [nombre] [categoría] [precio] [stock] [descripción]');
         }
         return;
     }
@@ -360,7 +481,7 @@ client.on('message', async (message) => {
         
         await simulateTyping(message, delay);
         const catalog = inventory.formatCatalogForWhatsApp(category);
-        await message.reply(catalog);
+        await safeReply(message, catalog);
         return;
     }
 
@@ -370,9 +491,9 @@ client.on('message', async (message) => {
         
         await simulateTyping(message, delay);
         if (products.length > 0) {
-            await message.reply(inventory.formatProductForWhatsApp(products[0]));
+            await safeReply(message, inventory.formatProductForWhatsApp(products[0]));
         } else {
-            await message.reply('❌ Producto no encontrado. Escribe !catalogo para ver todos los productos.');
+            await safeReply(message, '❌ Producto no encontrado. Escribe !catalogo para ver todos los productos.');
         }
         return;
     }
@@ -392,18 +513,18 @@ client.on('message', async (message) => {
             reportText += `${i+1}. ${p.name} (${p.sales} ventas)\n`;
         });
         
-        await message.reply(reportText);
+        await safeReply(message, reportText);
         return;
     }
 
     if (message.body === '!imagenes') {
         await simulateTyping(message, delay);
-        await message.reply('🎨 Generando catálogo visual con IA...');
+        await safeReply(message, '🎨 Generando catálogo visual con IA...');
         
         const catalogImages = await inventory.generateCatalogImages();
         
         for (const categoryData of catalogImages) {
-            await message.reply(`🖼️ *${categoryData.category.toUpperCase()}*\n${categoryData.imageUrl}`);
+            await safeReply(message, `🖼️ *${categoryData.category.toUpperCase()}*\n${categoryData.imageUrl}`);
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         return;
@@ -416,7 +537,7 @@ client.on('message', async (message) => {
         
         await simulateTyping(message, delay);
         const history = conversationManager.formatUserHistoryForWhatsApp(targetUserId);
-        await message.reply(history);
+        await safeReply(message, history);
         return;
     }
 
@@ -427,9 +548,9 @@ client.on('message', async (message) => {
         const success = conversationManager.addNote(userPhoneId, noteText);
         
         if (success) {
-            await message.reply('📝 Nota guardada correctamente en tu perfil');
+            await safeReply(message, '📝 Nota guardada correctamente en tu perfil');
         } else {
-            await message.reply('❌ Error guardando la nota');
+            await safeReply(message, '❌ Error guardando la nota');
         }
         return;
     }
@@ -458,7 +579,7 @@ client.on('message', async (message) => {
 
 ¡Te contactaré pronto para confirmar detalles y precio! 🌱`;
         
-        await message.reply(orderConfirmation);
+        await safeReply(message, orderConfirmation);
         return;
     }
 
@@ -483,7 +604,7 @@ client.on('message', async (message) => {
             });
         }
         
-        await message.reply(statsReport);
+        await safeReply(message, statsReport);
         return;
     }
 
@@ -497,7 +618,7 @@ client.on('message', async (message) => {
         });
         
         if (results.length === 0) {
-            await message.reply('❌ No se encontraron clientes con ese criterio');
+            await safeReply(message, '❌ No se encontraron clientes con ese criterio');
             return;
         }
         
@@ -511,7 +632,7 @@ client.on('message', async (message) => {
             searchResults += `🛒 Pedidos: ${customer.totalOrders} | 💰 Gastado: $${customer.totalSpent}\n\n`;
         });
         
-        await message.reply(searchResults);
+        await safeReply(message, searchResults);
         return;
     }
 
@@ -530,7 +651,7 @@ client.on('message', async (message) => {
         ];
         
         const randomPlant = plantResponses[Math.floor(Math.random() * plantResponses.length)];
-        await message.reply(randomPlant);
+        await safeReply(message, randomPlant);
         console.log('✅ Respuesta sobre plantas enviada');
         return;
     }
@@ -550,7 +671,7 @@ client.on('message', async (message) => {
         ];
         
         const randomIntro = introResponses[Math.floor(Math.random() * introResponses.length)];
-        await message.reply(randomIntro);
+        await safeReply(message, randomIntro);
         console.log('✅ Presentación enviada');
         return;
     }
@@ -570,7 +691,7 @@ client.on('message', async (message) => {
         ];
         
         const greetingResponse = greetingResponses[Math.floor(Math.random() * greetingResponses.length)];
-        await message.reply(greetingResponse);
+        await safeReply(message, greetingResponse);
         
         // Guardar respuesta
         conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', greetingResponse, false);
@@ -592,7 +713,7 @@ client.on('message', async (message) => {
             ];
             
             const randomPrice = priceResponses[Math.floor(Math.random() * priceResponses.length)];
-            await message.reply(randomPrice);
+            await safeReply(message, randomPrice);
         }
         else if (messageText.includes('mamada') || messageText.includes('mames') || messageText.includes('meriyein')) {
             const funnyResponses = [
@@ -603,7 +724,7 @@ client.on('message', async (message) => {
             ];
             
             const randomFunny = funnyResponses[Math.floor(Math.random() * funnyResponses.length)];
-            await message.reply(randomFunny);
+            await safeReply(message, randomFunny);
         }
         else if (messageText.includes('plantas') || messageText.includes('tienes')) {
             const plantResponses = [
@@ -614,7 +735,7 @@ client.on('message', async (message) => {
             ];
             
             const randomPlant = plantResponses[Math.floor(Math.random() * plantResponses.length)];
-            await message.reply(randomPlant);
+            await safeReply(message, randomPlant);
         }
         else {
             // Respuesta general más normal
@@ -626,7 +747,7 @@ client.on('message', async (message) => {
             ];
             
             const randomGeneral = generalResponses[Math.floor(Math.random() * generalResponses.length)];
-            await message.reply(randomGeneral);
+            await safeReply(message, randomGeneral);
         }
         
         // Guardar nuestra respuesta
@@ -647,7 +768,7 @@ client.on('message', async (message) => {
         ];
         
         const randomDiscount = discountResponses[Math.floor(Math.random() * discountResponses.length)];
-        await message.reply(randomDiscount);
+        await safeReply(message, randomDiscount);
         console.log('✅ Respuesta de descuento enviada');
         return;
     }
@@ -664,7 +785,7 @@ client.on('message', async (message) => {
         ];
         
         const randomAttention = attentionResponses[Math.floor(Math.random() * attentionResponses.length)];
-        await message.reply(randomAttention);
+        await safeReply(message, randomAttention);
         console.log('✅ Respuesta de atención enviada');
         return;
     }
@@ -678,10 +799,10 @@ client.on('message', async (message) => {
             
             try {
                 await client.sendMessage(`${numero}@c.us`, texto);
-                await message.reply(`✅ Mensaje enviado a ${numero}`);
+                await safeReply(message, `✅ Mensaje enviado a ${numero}`);
                 console.log(`📤 Mensaje enviado a ${numero}: ${texto}`);
             } catch (error) {
-                await message.reply(`❌ Error enviando mensaje: ${error.message}`);
+                await safeReply(message, `❌ Error enviando mensaje: ${error.message}`);
             }
         }
     }
@@ -705,7 +826,7 @@ client.on('message', async (message) => {
             }
         }
         
-        await message.reply(`✅ Mensaje enviado a ${enviados} contactos`);
+        await safeReply(message, `✅ Mensaje enviado a ${enviados} contactos`);
         console.log(`📤 Broadcast enviado a ${enviados} contactos`);
     }
     
@@ -759,16 +880,23 @@ client.on('message', async (message) => {
         helpMessage += `• !enviar 5219876543210 Hola\n`;
         helpMessage += `• !recordatorio Llamar al proveedor mañana`;
         
-        await message.reply(helpMessage);
+        await safeReply(message, helpMessage);
         console.log('✅ Menú de ayuda completo enviado');
     }
 });
 
-// Manejo de errores
-client.on('disconnected', (reason) => {
-    console.log('❌ Cliente desconectado:', reason);
+// Manejar errores globales del proceso
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promesa rechazada sin manejar:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Error no capturado:', error);
 });
 
 // Inicializar cliente
 console.log('🔄 Inicializando cliente...');
-client.initialize();
+client.initialize().catch(error => {
+    console.error('❌ Error inicializando cliente:', error);
+    attemptReconnect();
+});

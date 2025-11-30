@@ -26,11 +26,21 @@ const reminderSystem = new ReminderSystem();
 console.log('🔥 Coach Motivacional RUDO inicializado');
 console.log('⏰ Sistema de Recordatorios inicializado');
 
+// Estado global del cliente
+let isClientReady = false;
+let isInitializing = false;  // Track if client is currently initializing
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY = 10000; // 10 segundos
+
 // Crear cliente con autenticación local
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        clientId: 'husky-bot',
+        dataPath: './.wwebjs_auth'
+    }),
     puppeteer: { 
-        headless: true,  // Cambiar a true para evitar problemas
+        headless: true,
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
@@ -39,10 +49,69 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu',
-            '--disable-features=VizDisplayCompositor'
-        ]
+            '--disable-features=VizDisplayCompositor',
+            '--single-process',
+            '--disable-extensions'
+        ],
+        timeout: 60000
+    },
+    qrMaxRetries: 5,
+    restartOnAuthFail: true
+});
+
+/**
+ * 🔄 Función para reintentar conexión
+ */
+function attemptReconnect() {
+    // Prevent re-initialization if already initializing
+    if (isInitializing) {
+        console.log('⏳ Ya hay una inicialización en progreso, esperando...');
+        return;
     }
-});// Generar código QR
+    
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('❌ Se alcanzó el máximo de intentos de reconexión.');
+        console.log('💡 Reinicia el bot manualmente con: npm run bot');
+        return;
+    }
+    
+    reconnectAttempts++;
+    isInitializing = true;
+    console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+    
+    setTimeout(() => {
+        client.initialize()
+            .then(() => {
+                isInitializing = false;
+                // La conexión exitosa se maneja en los eventos 'ready' o 'authenticated'
+                console.log('🔄 Inicialización completada, esperando eventos del cliente...');
+            })
+            .catch((error) => {
+                isInitializing = false;
+                console.error('❌ Error en reconexión:', error.message);
+                // Solo reintentar si no hemos alcanzado el máximo
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    attemptReconnect();
+                } else {
+                    console.error('❌ Se agotaron los intentos de reconexión.');
+                    console.log('💡 Reinicia el bot manualmente con: npm run bot');
+                }
+            });
+    }, RECONNECT_DELAY);
+}
+
+/**
+ * 🔒 Verificar si el cliente está listo para enviar mensajes
+ */
+function isClientConnected() {
+    try {
+        return isClientReady && client && client.info;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Generar código QR
 client.on('qr', (qr) => {
     console.log('📱 Escanea este código QR con tu WhatsApp:');
     qrcode.generate(qr, {small: true});
@@ -51,18 +120,34 @@ client.on('qr', (qr) => {
 // Eventos de debugging
 client.on('authenticated', () => {
     console.log('🔐 Cliente autenticado correctamente');
+    reconnectAttempts = 0; // Resetear intentos al autenticar
 });
 
 client.on('auth_failure', (msg) => {
     console.error('❌ Error de autenticación:', msg);
+    isClientReady = false;
+    console.log('🔄 Intentando reconectar...');
+    attemptReconnect();
 });
 
 client.on('disconnected', (reason) => {
     console.log('🔌 Cliente desconectado:', reason);
+    isClientReady = false;
+    
+    // Solo reconectar si no fue logout manual
+    if (reason !== 'LOGOUT') {
+        console.log('🔄 Desconexión inesperada. Intentando reconectar...');
+        attemptReconnect();
+    } else {
+        console.log('👋 Sesión cerrada manualmente. Reinicia el bot para volver a conectar.');
+    }
 });
 
 // Cliente listo
 client.on('ready', () => {
+    isClientReady = true;
+    reconnectAttempts = 0; // Resetear intentos al estar listo
+    
     console.log('✅ Bot INTELIGENTE conectado exitosamente!');
     console.log('🎯 Bot listo para responder CUALQUIER mensaje');
     console.log('📸 Responde a imágenes, texto, stickers, TODO');
@@ -76,18 +161,60 @@ client.on('ready', () => {
     console.log('⏰ SISTEMA DE RECORDATORIOS ACTIVADO - Nunca se te olvidará nada!');
     
     // Enviar mensaje inicial al dueño
-    setTimeout(() => {
-        motivationalCoach.sendMotivationalMessage(client, 'general', 
-            '🔥 ¡EL COACH MOTIVACIONAL YA ESTÁ AQUÍ CABRÓN! ¡Prepárate para que te cague a mensajes hasta que cumplas tus metas! 💀');
+    setTimeout(async () => {
+        try {
+            if (isClientConnected()) {
+                await motivationalCoach.sendMotivationalMessage(client, 'general', 
+                    '🔥 ¡EL COACH MOTIVACIONAL YA ESTÁ AQUÍ CABRÓN! ¡Prepárate para que te cague a mensajes hasta que cumplas tus metas! 💀');
+            }
+        } catch (error) {
+            console.error('❌ Error enviando mensaje inicial:', error.message);
+        }
     }, 5000);
 });
 
-// Función para simular escritura
+// Función para simular escritura - con manejo de errores
 async function simulateTyping(message, delay) {
-    const chat = await message.getChat();
-    await chat.sendStateTyping();
-    await new Promise(resolve => setTimeout(resolve, delay));
-    await chat.clearState();
+    if (!isClientConnected()) {
+        console.log('⚠️ Cliente no conectado, saltando simulación de escritura');
+        return;
+    }
+    
+    try {
+        const chat = await message.getChat();
+        await chat.sendStateTyping();
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await chat.clearState();
+    } catch (error) {
+        console.log('⚠️ Error simulando escritura (ignorando):', error.message);
+        // No lanzar error, solo esperar el delay
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+}
+
+/**
+ * 🔒 Función segura para enviar respuesta
+ */
+async function safeReply(message, response) {
+    if (!isClientConnected()) {
+        console.error('❌ No se puede enviar mensaje: cliente desconectado');
+        return false;
+    }
+    
+    try {
+        await message.reply(response);
+        return true;
+    } catch (error) {
+        console.error('❌ Error enviando respuesta:', error.message);
+        
+        // Si es error de evaluación, el cliente probablemente se desconectó
+        if (error.message.includes('Evaluation failed') || error.message.includes('Protocol error')) {
+            isClientReady = false;
+            console.log('🔄 Conexión perdida. Intentando reconectar...');
+        }
+        
+        return false;
+    }
 }
 
 // Variables para respuesta rápida
@@ -286,6 +413,12 @@ function generateLowStockAlert() {
 
 // Manejo de mensajes INTELIGENTE
 client.on('message', async (message) => {
+    // Verificar que el cliente está conectado antes de procesar
+    if (!isClientConnected()) {
+        console.log('⚠️ Mensaje recibido pero cliente no está listo');
+        return;
+    }
+    
     // FILTRAR mensajes no deseados
     if (message.from === 'status@broadcast' || message.isStatus || message.fromMe) {
         return;
@@ -417,7 +550,7 @@ client.on('message', async (message) => {
     // Si ya tengo respuesta por contexto, salir
     if (response) {
         conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', response, false);
-        await message.reply(response);
+        await safeReply(message, response);
         return;
     }
 
@@ -427,7 +560,7 @@ client.on('message', async (message) => {
         if (messageText === '!help' || messageText === 'help' || messageText === 'comandos') {
             const helpMessage = generateOwnerHelpMessage();
             conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', helpMessage, false);
-            await message.reply(helpMessage);
+            await safeReply(message, helpMessage);
             console.log('📋 Comandos de dueño enviados');
             return;
         }
@@ -436,7 +569,7 @@ client.on('message', async (message) => {
         if (messageText.includes('stock completo') || messageText === 'stock' || messageText === 'inventario completo') {
             const stockInfo = await generateStockReport();
             conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', stockInfo, false);
-            await message.reply(stockInfo);
+            await safeReply(message, stockInfo);
             console.log('📊 Stock completo enviado');
             return;
         }
@@ -466,21 +599,21 @@ client.on('message', async (message) => {
                         const successMsg = `✅ **PLANTA AGREGADA AL INVENTARIO**\n\n🌱 **${newPlant.displayName}**\n💰 Precio: $${price}\n📦 Stock: ${stock} unidades\n\n¡Listo para vender! 🐺`;
                         
                         conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', successMsg, false);
-                        await message.reply(successMsg);
+                        await safeReply(message, successMsg);
                         console.log(`✅ Nueva planta agregada: ${plantName}`);
                         return;
                     } catch (error) {
                         const errorMsg = `❌ No pude agregar la planta "${plantName}". Error: ${error.message}`;
-                        await message.reply(errorMsg);
+                        await safeReply(message, errorMsg);
                         console.error('Error agregando planta:', error);
                         return;
                     }
                 } else {
-                    await message.reply('❌ Precio y stock deben ser números.\n\n💡 Uso: `agregar [planta] [precio] [stock]`\n📝 Ejemplo: `agregar lavanda 35 15`');
+                    await safeReply(message, '❌ Precio y stock deben ser números.\n\n💡 Uso: `agregar [planta] [precio] [stock]`\n📝 Ejemplo: `agregar lavanda 35 15`');
                     return;
                 }
             } else {
-                await message.reply('❌ Formato incorrecto.\n\n💡 Uso: `agregar [planta] [precio] [stock]`\n📝 Ejemplo: `agregar lavanda 35 15`');
+                await safeReply(message, '❌ Formato incorrecto.\n\n💡 Uso: `agregar [planta] [precio] [stock]`\n📝 Ejemplo: `agregar lavanda 35 15`');
                 return;
             }
         }
@@ -489,7 +622,7 @@ client.on('message', async (message) => {
         if (messageText.includes('stock bajo') || messageText.includes('alertas')) {
             const lowStockInfo = generateLowStockAlert();
             conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', lowStockInfo, false);
-            await message.reply(lowStockInfo);
+            await safeReply(message, lowStockInfo);
             console.log('⚠️ Alertas de stock bajo enviadas');
             return;
         }
@@ -497,7 +630,7 @@ client.on('message', async (message) => {
         const inventoryResponse = inventoryManager.processInventoryCommand(messageText, userPhoneId);
         if (inventoryResponse) {
             conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', inventoryResponse, false);
-            await message.reply(inventoryResponse);
+            await safeReply(message, inventoryResponse);
             console.log('📦 Comando de inventario procesado');
             return;
         }
@@ -902,22 +1035,39 @@ ${firstPlant.features ? `🧬 Características: ${firstPlant.features.join(', ')
     }
 
     // ENVIAR RESPUESTA Y GUARDAR
-    try {
-        await message.reply(response);
+    const sent = await safeReply(message, response);
+    if (sent) {
         conversationManager.logMessage(userPhoneId, 'La Huerta del Husky', response, false);
         console.log('✅ Respuesta INTELIGENTE enviada y guardada');
         
         // 🔥 DETECCIÓN AUTOMÁTICA DEL COACH MOTIVACIONAL (SOLO PARA EL DUEÑO)
         if (inventoryManager.isOwner(userPhoneId)) {
-            motivationalCoach.detectAndRespond(client, message.body);
+            try {
+                motivationalCoach.detectAndRespond(client, message.body);
+            } catch (coachError) {
+                console.error('⚠️ Error en coach motivacional:', coachError.message);
+            }
         }
-        
-    } catch (error) {
-        console.error('❌ Error enviando respuesta:', error);
+    } else {
+        console.log('⚠️ No se pudo enviar respuesta - cliente posiblemente desconectado');
     }
 });
 
+// Manejar errores globales del proceso
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promesa rechazada sin manejar:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Error no capturado:', error);
+    // No cerrar el proceso, intentar continuar
+});
+
 // Inicializar cliente
-client.initialize();
+console.log('🔄 Inicializando cliente...');
+client.initialize().catch(error => {
+    console.error('❌ Error inicializando cliente:', error);
+    attemptReconnect();
+});
 
 console.log('🚀 Bot MÁXIMO PODER iniciado - Responde a TODO!');
