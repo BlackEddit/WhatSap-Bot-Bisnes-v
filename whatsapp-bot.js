@@ -98,7 +98,7 @@ async function safeReply(message, response) {
     }
     
     try {
-        await safeReply(message, response);
+        await message.reply(response);
         return true;
     } catch (error) {
         console.error('❌ Error enviando respuesta:', error.message);
