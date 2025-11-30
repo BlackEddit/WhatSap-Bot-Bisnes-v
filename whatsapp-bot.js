@@ -31,6 +31,7 @@ const imageAnalyzer = new ImageAnalyzer();
 
 // Estado global del cliente
 let isClientReady = false;
+let isInitializing = false;  // Track if client is currently initializing
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 10000;
@@ -63,6 +64,11 @@ const client = new Client({
  * 🔄 Función para reintentar conexión
  */
 function attemptReconnect() {
+    // Prevent re-initialization if already initializing
+    if (isInitializing) {
+        console.log('⏳ Ya hay una inicialización en progreso, esperando...');
+        return;
+    }
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.error('❌ Se alcanzó el máximo de intentos de reconexión.');
         console.log('💡 Reinicia el bot manualmente con: npm run bot');
@@ -70,15 +76,18 @@ function attemptReconnect() {
     }
     
     reconnectAttempts++;
+    isInitializing = true;
     console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
     
     setTimeout(() => {
         client.initialize()
             .then(() => {
+                isInitializing = false;
                 // La conexión exitosa se maneja en los eventos 'ready' o 'authenticated'
                 console.log('🔄 Inicialización completada, esperando eventos del cliente...');
             })
             .catch((error) => {
+                isInitializing = false;
                 console.error('❌ Error en reconexión:', error.message);
                 // Solo reintentar si no hemos alcanzado el máximo
                 if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
