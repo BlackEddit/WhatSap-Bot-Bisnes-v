@@ -65,6 +65,7 @@ const client = new Client({
 async function attemptReconnect() {
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.error('❌ Se alcanzó el máximo de intentos de reconexión.');
+        console.log('💡 Reinicia el bot manualmente con: npm run bot');
         return;
     }
     
@@ -74,9 +75,17 @@ async function attemptReconnect() {
     setTimeout(async () => {
         try {
             await client.initialize();
+            // Si llega aquí sin error, la conexión fue exitosa
+            // Los eventos 'ready' o 'authenticated' resetearán reconnectAttempts
         } catch (error) {
             console.error('❌ Error en reconexión:', error.message);
-            attemptReconnect();
+            // Solo reintentar si no hemos alcanzado el máximo
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                attemptReconnect();
+            } else {
+                console.error('❌ Se agotaron los intentos de reconexión.');
+                console.log('💡 Reinicia el bot manualmente con: npm run bot');
+            }
         }
     }, RECONNECT_DELAY);
 }
