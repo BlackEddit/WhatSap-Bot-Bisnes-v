@@ -62,7 +62,7 @@ const client = new Client({
 /**
  * 🔄 Función para reintentar conexión
  */
-async function attemptReconnect() {
+function attemptReconnect() {
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.error('❌ Se alcanzó el máximo de intentos de reconexión.');
         console.log('💡 Reinicia el bot manualmente con: npm run bot');
@@ -72,21 +72,22 @@ async function attemptReconnect() {
     reconnectAttempts++;
     console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
     
-    setTimeout(async () => {
-        try {
-            await client.initialize();
-            // Si llega aquí sin error, la conexión fue exitosa
-            // Los eventos 'ready' o 'authenticated' resetearán reconnectAttempts
-        } catch (error) {
-            console.error('❌ Error en reconexión:', error.message);
-            // Solo reintentar si no hemos alcanzado el máximo
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                attemptReconnect();
-            } else {
-                console.error('❌ Se agotaron los intentos de reconexión.');
-                console.log('💡 Reinicia el bot manualmente con: npm run bot');
-            }
-        }
+    setTimeout(() => {
+        client.initialize()
+            .then(() => {
+                // La conexión exitosa se maneja en los eventos 'ready' o 'authenticated'
+                console.log('🔄 Inicialización completada, esperando eventos del cliente...');
+            })
+            .catch((error) => {
+                console.error('❌ Error en reconexión:', error.message);
+                // Solo reintentar si no hemos alcanzado el máximo
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    attemptReconnect();
+                } else {
+                    console.error('❌ Se agotaron los intentos de reconexión.');
+                    console.log('💡 Reinicia el bot manualmente con: npm run bot');
+                }
+            });
     }, RECONNECT_DELAY);
 }
 
@@ -94,7 +95,11 @@ async function attemptReconnect() {
  * 🔒 Verificar si el cliente está listo
  */
 function isClientConnected() {
-    return isClientReady && client.info;
+    try {
+        return isClientReady && client && client.info;
+    } catch (error) {
+        return false;
+    }
 }
 
 /**
